@@ -62,11 +62,11 @@ model = load_model()
 def extract_features(img_path):
     try:
         img = image.load_img(img_path, target_size=(224, 224))
-        img_array = image.img_to_array(img)
+        img_array = image.img_to_array(img, dtype="float32")  # Ensure dtype is float32
         img_array = np.expand_dims(img_array, axis=0)
         img_array = preprocess_input(img_array)
         features = model.predict(img_array)
-        return features.flatten().astype(np.float32)
+        return features.flatten().astype(np.float32)  # Ensure consistent dtype
     except Exception as e:
         st.error(f"Error processing image {img_path}: {e}")
         return None
@@ -93,13 +93,13 @@ def prepare_clusters(folder, num_clusters):
     feature_list = np.array(feature_list, dtype=np.float32)
 
     # Perform clustering
-    kmeans = KMeans(n_clusters=num_clusters, random_state=42)
+    kmeans = KMeans(n_clusters=num_clusters, random_state=42, n_init="auto")
     cluster_assignments = kmeans.fit_predict(feature_list)
 
     # Save cluster assignments, features, and image paths
     clusters = {
         "kmeans": kmeans,
-        "features": np.array(feature_list),
+        "features": feature_list,
         "image_paths": image_paths,
         "assignments": cluster_assignments,
     }
