@@ -78,7 +78,7 @@ kmeans = KMeans(n_clusters=num_clusters, random_state=42)
 cluster_assignments = kmeans.fit_predict(feature_list)
 
     # Save cluster assignments, features, and image paths
-    clusters = {
+clusters = {
         "kmeans": kmeans,
         "features": np.array(feature_list),
         "image_paths": image_paths,
