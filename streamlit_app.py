@@ -84,7 +84,7 @@ clusters = {
         "image_paths": image_paths,
         "assignments": cluster_assignments,
     }
-    with open(CLUSTER_MODEL_FILE, "wb") as file:
+with open(CLUSTER_MODEL_FILE, "wb") as file:
         pickle.dump(clusters, file)
 
     return clusters
