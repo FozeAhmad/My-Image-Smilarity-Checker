@@ -85,8 +85,7 @@ clusters = {
         "assignments": cluster_assignments,
     }
 with open(CLUSTER_MODEL_FILE, "wb") as file:
-        pickle.dump(clusters, file)
-
+    pickle.dump(clusters, file)
     return clusters
 
 # Load precomputed clusters
