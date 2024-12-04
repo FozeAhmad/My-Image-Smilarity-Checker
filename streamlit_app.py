@@ -89,6 +89,7 @@ def prepare_clusters(folder, num_clusters):
         st.error("No valid images found in the dataset folder.")
         return None
 
+    # Ensure features are of type np.float32
     feature_list = np.array(feature_list, dtype=np.float32)
 
     # Perform clustering
