@@ -86,7 +86,8 @@ clusters = {
     }
 with open(CLUSTER_MODEL_FILE, "wb") as file:
  pickle.dump(clusters, file)
- return clusters
+ 
+return clusters
 
 # Load precomputed clusters
 @st.cache_data
