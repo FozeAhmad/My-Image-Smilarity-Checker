@@ -56,7 +56,7 @@ def extract_features(img_path):
     img_array = np.expand_dims(img_array, axis=0)
     img_array = preprocess_input(img_array)
     features = model.predict(img_array)
-    return features.flatten()
+    return features.flatten().astype(np.float32)
 
 # Precompute features and clusters
 @st.cache_data
@@ -71,6 +71,7 @@ def prepare_clusters(folder, num_clusters):
             features = extract_features(img_path)
             feature_list.append(features)
             image_paths.append(img_path)
+feature_list = np.array(feature_list, dtype=np.float32)
 
     # Perform clustering
     kmeans = KMeans(n_clusters=num_clusters, random_state=42)
@@ -119,7 +120,7 @@ if uploaded_file is not None:
     cluster_image_paths = [clusters["image_paths"][i] for i in cluster_indices]
 
     # Compute similarity within the cluster
-    similarities = cosine_similarity(uploaded_features, cluster_features)[0]
+    similarities = cosine_similarity(uploaded_features.astype(np.float32), cluster_features.astype(np.float32))[0]
     top_indices = np.argsort(similarities)[-5:][::-1]  # Top 5 similar images
 
     # Display results
