@@ -1,0 +1,8 @@
+streamlit
+numpy
+opencv-python-headless  # Use this for environments without GUI support
+pandas
+requests
+scikit-learn
+tensorflow
+matplotlib
