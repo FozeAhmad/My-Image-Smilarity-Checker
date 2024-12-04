@@ -137,23 +137,39 @@ if uploaded_file is not None:
     uploaded_features = extract_features(uploaded_image_path).reshape(1, -1)
 
     # Assign to nearest cluster
-    assigned_cluster = clusters["kmeans"].predict(uploaded_features)[0]
+# Assign to nearest cluster
+if clusters:  # Ensure clusters are loaded
+    try:
+        # Ensure the uploaded features are of the correct dtype and shape
+        uploaded_features = np.array(uploaded_features, dtype=np.float32).reshape(1, -1)
 
-    # Get images in the same cluster
-    cluster_indices = np.where(clusters["assignments"] == assigned_cluster)[0]
-    cluster_features = clusters["features"][cluster_indices]
-    cluster_image_paths = [clusters["image_paths"][i] for i in cluster_indices]
+        # Predict the cluster
+        assigned_cluster = clusters["kmeans"].predict(uploaded_features)[0]
 
-    # Compute similarity within the cluster
-    similarities = cosine_similarity(uploaded_features.astype(np.float32), cluster_features.astype(np.float32))[0]
-    top_indices = np.argsort(similarities)[-5:][::-1]  # Top 5 similar images
+        # Get images in the same cluster
+        cluster_indices = np.where(clusters["assignments"] == assigned_cluster)[0]
+        cluster_features = clusters["features"][cluster_indices]
+        cluster_image_paths = [clusters["image_paths"][i] for i in cluster_indices]
 
-    # Display results
-    st.image(uploaded_image_path, caption="Uploaded Image", use_column_width=True)
-    st.write("Top 5 similar images:")
-    for idx in top_indices:
-        similar_image_path = cluster_image_paths[idx]
-        similarity_score = similarities[idx]
-        img = cv2.imread(similar_image_path)
-        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-        st.image(img, caption=f"Score: {similarity_score:.4f}", use_column_width=True)
+        # Compute similarity within the cluster
+        similarities = cosine_similarity(
+            uploaded_features.astype(np.float32),
+            cluster_features.astype(np.float32)
+        )[0]
+        top_indices = np.argsort(similarities)[-5:][::-1]  # Top 5 similar images
+
+        # Display results
+        st.image(uploaded_image_path, caption="Uploaded Image", use_column_width=True)
+        st.write("Top 5 similar images:")
+        for idx in top_indices:
+            similar_image_path = cluster_image_paths[idx]
+            similarity_score = similarities[idx]
+            img = cv2.imread(similar_image_path)
+            img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+            st.image(img, caption=f"Score: {similarity_score:.4f}", use_column_width=True)
+
+    except Exception as e:
+        st.error(f"Error during clustering or similarity search: {e}")
+else:
+    st.error("Clusters are not loaded or initialized.")
+
