@@ -2,31 +2,31 @@ import os
 import requests
 import numpy as np
 import pandas as pd
-import cv2
+from sklearn.cluster import KMeans
 from sklearn.metrics.pairwise import cosine_similarity
 from tensorflow.keras.applications.vgg16 import VGG16, preprocess_input
 from tensorflow.keras.preprocessing import image
 from tensorflow.keras.models import Model
+import cv2
+import pickle
 import streamlit as st
 
 # Streamlit UI
-st.title("Image Similarity Finder")
+st.title("Clustered Image Similarity Finder")
 
-# Define constants
 DATASET_FOLDER = "dataset"
+CLUSTER_MODEL_FILE = "clusters.pkl"
+NUM_CLUSTERS = 20  # Adjust as needed
 
-# Function to download images from a Google Sheet
+# Function to download images
 def download_images_from_sheet(sheet_id, output_folder):
     if not os.path.exists(output_folder):
         os.makedirs(output_folder)
 
-    # Load Google Sheet as a DataFrame
     sheet_url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv"
     df = pd.read_csv(sheet_url)
 
-    # Extract image links from the second column (adjust if necessary)
     image_links = df.iloc[:, 1].dropna()
-
     for idx, link in enumerate(image_links, 1):
         try:
             response = requests.get(link, stream=True)
@@ -41,15 +41,6 @@ def download_images_from_sheet(sheet_id, output_folder):
         except Exception as e:
             st.error(f"Error downloading {link}: {e}")
 
-# Function to extract features using VGG16
-def extract_features(img_path):
-    img = image.load_img(img_path, target_size=(224, 224))
-    img_array = image.img_to_array(img)
-    img_array = np.expand_dims(img_array, axis=0)
-    img_array = preprocess_input(img_array)
-    features = model.predict(img_array)
-    return features.flatten()
-
 # Pre-load VGG16 model
 @st.cache_resource
 def load_model():
@@ -58,29 +49,57 @@ def load_model():
 
 model = load_model()
 
-# Load features and image paths
+# Function to extract features
+def extract_features(img_path):
+    img = image.load_img(img_path, target_size=(224, 224))
+    img_array = image.img_to_array(img)
+    img_array = np.expand_dims(img_array, axis=0)
+    img_array = preprocess_input(img_array)
+    features = model.predict(img_array)
+    return features.flatten()
+
+# Precompute features and clusters
 @st.cache_data
-def prepare_dataset(folder):
+def prepare_clusters(folder, num_clusters):
     feature_list = []
     image_paths = []
+
+    # Extract features for all images
     for filename in os.listdir(folder):
         if filename.endswith((".jpg", ".jpeg", ".png")):
             img_path = os.path.join(folder, filename)
             features = extract_features(img_path)
             feature_list.append(features)
             image_paths.append(img_path)
-    return np.array(feature_list), image_paths
 
-# Main Functionality
-# Download dataset
-SHEET_ID = '121aV7BjJqCRlFcVegbbhI1Zmt67wG61ayRiFtDnafKY'
-download_images_from_sheet(SHEET_ID, DATASET_FOLDER)
+    # Perform clustering
+    kmeans = KMeans(n_clusters=num_clusters, random_state=42)
+    cluster_assignments = kmeans.fit_predict(feature_list)
 
-# Prepare dataset
-st.write("Preparing dataset...")
-feature_list, image_paths = prepare_dataset(DATASET_FOLDER)
+    # Save cluster assignments, features, and image paths
+    clusters = {
+        "kmeans": kmeans,
+        "features": np.array(feature_list),
+        "image_paths": image_paths,
+        "assignments": cluster_assignments,
+    }
+    with open(CLUSTER_MODEL_FILE, "wb") as file:
+        pickle.dump(clusters, file)
 
-# Upload image and find similar images
+    return clusters
+
+# Load precomputed clusters
+@st.cache_data
+def load_clusters():
+    if os.path.exists(CLUSTER_MODEL_FILE):
+        with open(CLUSTER_MODEL_FILE, "rb") as file:
+            return pickle.load(file)
+    else:
+        return prepare_clusters(DATASET_FOLDER, NUM_CLUSTERS)
+
+clusters = load_clusters()
+
+# Main functionality
 uploaded_file = st.file_uploader("Upload an image", type=["jpg", "jpeg", "png"])
 if uploaded_file is not None:
     # Save uploaded image locally
@@ -89,21 +108,26 @@ if uploaded_file is not None:
         file.write(uploaded_file.read())
 
     # Extract features of the uploaded image
-    new_image_features = extract_features(uploaded_image_path).reshape(1, -1)
+    uploaded_features = extract_features(uploaded_image_path).reshape(1, -1)
 
-    # Compute cosine similarity
-    similarities = cosine_similarity(new_image_features, feature_list)[0]
+    # Assign to nearest cluster
+    assigned_cluster = clusters["kmeans"].predict(uploaded_features)[0]
 
-    # Get indices of top 5 similar images
-    top_indices = np.argsort(similarities)[-5:][::-1]
+    # Get images in the same cluster
+    cluster_indices = np.where(clusters["assignments"] == assigned_cluster)[0]
+    cluster_features = clusters["features"][cluster_indices]
+    cluster_image_paths = [clusters["image_paths"][i] for i in cluster_indices]
+
+    # Compute similarity within the cluster
+    similarities = cosine_similarity(uploaded_features, cluster_features)[0]
+    top_indices = np.argsort(similarities)[-5:][::-1]  # Top 5 similar images
 
     # Display results
     st.image(uploaded_image_path, caption="Uploaded Image", use_column_width=True)
     st.write("Top 5 similar images:")
     for idx in top_indices:
-        similar_image_path = image_paths[idx]
+        similar_image_path = cluster_image_paths[idx]
         similarity_score = similarities[idx]
         img = cv2.imread(similar_image_path)
         img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         st.image(img, caption=f"Score: {similarity_score:.4f}", use_column_width=True)
-
