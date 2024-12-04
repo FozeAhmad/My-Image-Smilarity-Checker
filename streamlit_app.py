@@ -18,6 +18,7 @@ DATASET_FOLDER = "dataset"
 CLUSTER_MODEL_FILE = "clusters.pkl"
 NUM_CLUSTERS = 20  # Adjust as needed
 sheet_id = '121aV7BjJqCRlFcVegbbhI1Zmt67wG61ayRiFtDnafKY'
+
 # Function to download images
 def download_images_from_sheet(sheet_id, output_folder):
     if not os.path.exists(output_folder):
@@ -27,7 +28,11 @@ def download_images_from_sheet(sheet_id, output_folder):
     try:
         df = pd.read_csv(sheet_url)
     except Exception as e:
-        st.error(f"Error loading the sheet: {e}")
+        st.error(f"Failed to fetch the spreadsheet: {e}")
+        return
+
+    if len(df.columns) < 2:
+        st.error("Spreadsheet must have at least 2 columns (index and image URL).")
         return
 
     image_links = df.iloc[:, 1].dropna()
@@ -48,7 +53,7 @@ def download_images_from_sheet(sheet_id, output_folder):
 # Pre-load VGG16 model
 @st.cache_resource
 def load_model():
-    base_model = VGG16(weights="imagenet", include_top=False, input_shape=(224, 224, 3))
+    base_model = VGG16(weights='imagenet', include_top=False, input_shape=(224, 224, 3))
     return Model(inputs=base_model.input, outputs=base_model.output)
 
 model = load_model()
@@ -63,7 +68,7 @@ def extract_features(img_path):
         features = model.predict(img_array)
         return features.flatten().astype(np.float32)
     except Exception as e:
-        st.error(f"Error extracting features from {img_path}: {e}")
+        st.error(f"Error processing image {img_path}: {e}")
         return None
 
 # Precompute features and clusters
@@ -74,10 +79,10 @@ def prepare_clusters(folder, num_clusters):
 
     # Extract features for all images
     for filename in os.listdir(folder):
-        if filename.lower().endswith((".jpg", ".jpeg", ".png")):
+        if filename.endswith((".jpg", ".jpeg", ".png")):
             img_path = os.path.join(folder, filename)
             features = extract_features(img_path)
-            if features is not None:
+            if features is not None:  # Skip if feature extraction fails
                 feature_list.append(features)
                 image_paths.append(img_path)
 
@@ -85,9 +90,7 @@ def prepare_clusters(folder, num_clusters):
         st.error("No valid images found in the dataset folder.")
         return None
 
-    # Convert feature_list to np.float32
     feature_list = np.array(feature_list, dtype=np.float32)
-    st.write(f"Feature list dtype: {feature_list.dtype}")  # Debugging check
 
     # Perform clustering
     kmeans = KMeans(n_clusters=num_clusters, random_state=42)
@@ -96,7 +99,7 @@ def prepare_clusters(folder, num_clusters):
     # Save cluster assignments, features, and image paths
     clusters = {
         "kmeans": kmeans,
-        "features": feature_list,
+        "features": np.array(feature_list),
         "image_paths": image_paths,
         "assignments": cluster_assignments,
     }
@@ -110,46 +113,47 @@ def prepare_clusters(folder, num_clusters):
 def load_clusters():
     if os.path.exists(CLUSTER_MODEL_FILE):
         with open(CLUSTER_MODEL_FILE, "rb") as file:
-            clusters = pickle.load(file)
-            # Ensure features are np.float32
-            clusters["features"] = np.array(clusters["features"], dtype=np.float32)
-            return clusters
+            return pickle.load(file)
     else:
         return prepare_clusters(DATASET_FOLDER, NUM_CLUSTERS)
+
+# Trigger image download
+if st.button("Download Images"):
+    download_images_from_sheet(sheet_id, DATASET_FOLDER)
+    clusters = prepare_clusters(DATASET_FOLDER, NUM_CLUSTERS)
+
+# Load clusters
+clusters = load_clusters()
 
 # Main functionality
 uploaded_file = st.file_uploader("Upload an image", type=["jpg", "jpeg", "png"])
 if uploaded_file is not None:
+    # Save uploaded image locally
     uploaded_image_path = "uploaded_image.jpg"
     with open(uploaded_image_path, "wb") as file:
         file.write(uploaded_file.read())
 
     # Extract features of the uploaded image
-    uploaded_features = extract_features(uploaded_image_path)
-    if uploaded_features is not None:
-        uploaded_features = uploaded_features.reshape(1, -1)
+    uploaded_features = extract_features(uploaded_image_path).reshape(1, -1)
 
-        # Assign to nearest cluster
-        assigned_cluster = clusters["kmeans"].predict(uploaded_features)[0]
+    # Assign to nearest cluster
+    assigned_cluster = clusters["kmeans"].predict(uploaded_features)[0]
 
-        # Get images in the same cluster
-        cluster_indices = np.where(clusters["assignments"] == assigned_cluster)[0]
-        cluster_features = clusters["features"][cluster_indices]
-        cluster_image_paths = [clusters["image_paths"][i] for i in cluster_indices]
+    # Get images in the same cluster
+    cluster_indices = np.where(clusters["assignments"] == assigned_cluster)[0]
+    cluster_features = clusters["features"][cluster_indices]
+    cluster_image_paths = [clusters["image_paths"][i] for i in cluster_indices]
 
-        # Compute similarity within the cluster
-        similarities = cosine_similarity(uploaded_features.astype(np.float32), cluster_features.astype(np.float32))[0]
-        top_indices = np.argsort(similarities)[-5:][::-1]  # Top 5 similar images
+    # Compute similarity within the cluster
+    similarities = cosine_similarity(uploaded_features.astype(np.float32), cluster_features.astype(np.float32))[0]
+    top_indices = np.argsort(similarities)[-5:][::-1]  # Top 5 similar images
 
-        # Display results
-        st.image(uploaded_image_path, caption="Uploaded Image", use_column_width=True)
-        st.write("Top 5 similar images:")
-        for idx in top_indices:
-            similar_image_path = cluster_image_paths[idx]
-            similarity_score = similarities[idx]
-            img = cv2.imread(similar_image_path)
-            img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-            st.image(img, caption=f"Score: {similarity_score:.4f}", use_column_width=True)
-
-    # Cleanup
-    os.remove(uploaded_image_path)
+    # Display results
+    st.image(uploaded_image_path, caption="Uploaded Image", use_column_width=True)
+    st.write("Top 5 similar images:")
+    for idx in top_indices:
+        similar_image_path = cluster_image_paths[idx]
+        similarity_score = similarities[idx]
+        img = cv2.imread(similar_image_path)
+        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        st.image(img, caption=f"Score: {similarity_score:.4f}", use_column_width=True)
