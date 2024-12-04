@@ -71,23 +71,24 @@ def prepare_clusters(folder, num_clusters):
             features = extract_features(img_path)
             feature_list.append(features)
             image_paths.append(img_path)
-feature_list = np.array(feature_list, dtype=np.float32)
+
+    feature_list = np.array(feature_list, dtype=np.float32)
 
     # Perform clustering
-kmeans = KMeans(n_clusters=num_clusters, random_state=42)
-cluster_assignments = kmeans.fit_predict(feature_list)
+    kmeans = KMeans(n_clusters=num_clusters, random_state=42)
+    cluster_assignments = kmeans.fit_predict(feature_list)
 
     # Save cluster assignments, features, and image paths
-clusters = {
+    clusters = {
         "kmeans": kmeans,
         "features": np.array(feature_list),
         "image_paths": image_paths,
         "assignments": cluster_assignments,
     }
-with open(CLUSTER_MODEL_FILE, "wb") as file:
- pickle.dump(clusters, file)
- 
-return clusters
+    with open(CLUSTER_MODEL_FILE, "wb") as file:
+        pickle.dump(clusters, file)
+
+    return clusters  # Ensure clusters are returned
 
 # Load precomputed clusters
 @st.cache_data
