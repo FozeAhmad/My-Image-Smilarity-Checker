@@ -74,8 +74,8 @@ def prepare_clusters(folder, num_clusters):
 feature_list = np.array(feature_list, dtype=np.float32)
 
     # Perform clustering
-    kmeans = KMeans(n_clusters=num_clusters, random_state=42)
-    cluster_assignments = kmeans.fit_predict(feature_list)
+kmeans = KMeans(n_clusters=num_clusters, random_state=42)
+cluster_assignments = kmeans.fit_predict(feature_list)
 
     # Save cluster assignments, features, and image paths
     clusters = {
