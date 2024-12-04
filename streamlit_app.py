@@ -72,10 +72,6 @@ def prepare_clusters(folder, num_clusters):
     feature_list = []
     image_paths = []
 
-    if not os.listdir(folder):
-        st.error("Dataset folder is empty!")
-        return None
-
     # Extract features for all images
     for filename in os.listdir(folder):
         if filename.lower().endswith((".jpg", ".jpeg", ".png")):
@@ -89,8 +85,9 @@ def prepare_clusters(folder, num_clusters):
         st.error("No valid images found in the dataset folder.")
         return None
 
-    # Ensure features are of type np.float32
+    # Convert feature_list to np.float32
     feature_list = np.array(feature_list, dtype=np.float32)
+    st.write(f"Feature list dtype: {feature_list.dtype}")  # Debugging check
 
     # Perform clustering
     kmeans = KMeans(n_clusters=num_clusters, random_state=42)
@@ -113,11 +110,12 @@ def prepare_clusters(folder, num_clusters):
 def load_clusters():
     if os.path.exists(CLUSTER_MODEL_FILE):
         with open(CLUSTER_MODEL_FILE, "rb") as file:
-            return pickle.load(file)
+            clusters = pickle.load(file)
+            # Ensure features are np.float32
+            clusters["features"] = np.array(clusters["features"], dtype=np.float32)
+            return clusters
     else:
         return prepare_clusters(DATASET_FOLDER, NUM_CLUSTERS)
-
-clusters = load_clusters()
 
 # Main functionality
 uploaded_file = st.file_uploader("Upload an image", type=["jpg", "jpeg", "png"])
