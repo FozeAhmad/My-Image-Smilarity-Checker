@@ -1,41 +1,32 @@
+import streamlit as st
 import os
-import requests
 import numpy as np
+import cv2
 import pandas as pd
-from sklearn.cluster import KMeans
 from sklearn.metrics.pairwise import cosine_similarity
 from tensorflow.keras.applications.vgg16 import VGG16, preprocess_input
 from tensorflow.keras.preprocessing import image
 from tensorflow.keras.models import Model
-import cv2
-import pickle
-import streamlit as st
+import matplotlib.pyplot as plt
 
-# Streamlit UI
-st.title("Clustered Image Similarity Finder")
+# Initialize the model
+base_model = VGG16(weights='imagenet', include_top=False, input_shape=(224, 224, 3))
+model = Model(inputs=base_model.input, outputs=base_model.output)
 
-DATASET_FOLDER = "dataset"
-CLUSTER_MODEL_FILE = "clusters.pkl"
-NUM_CLUSTERS = 20  # Adjust as needed
-sheet_id = '121aV7BjJqCRlFcVegbbhI1Zmt67wG61ayRiFtDnafKY'
+# Feature extraction function
+def extract_features(img_path):
+    img = image.load_img(img_path, target_size=(224, 224))
+    img_array = image.img_to_array(img)
+    img_array = np.expand_dims(img_array, axis=0)
+    img_array = preprocess_input(img_array)
+    features = model.predict(img_array)
+    return features.flatten()
 
 # Function to download images
-def download_images_from_sheet(sheet_id, output_folder):
+def download_images(image_links, output_folder):
     if not os.path.exists(output_folder):
         os.makedirs(output_folder)
 
-    sheet_url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv"
-    try:
-        df = pd.read_csv(sheet_url)
-    except Exception as e:
-        st.error(f"Failed to fetch the spreadsheet: {e}")
-        return
-
-    if len(df.columns) < 2:
-        st.error("Spreadsheet must have at least 2 columns (index and image URL).")
-        return
-
-    image_links = df.iloc[:, 1].dropna()
     for idx, link in enumerate(image_links, 1):
         try:
             response = requests.get(link, stream=True)
@@ -46,134 +37,73 @@ def download_images_from_sheet(sheet_id, output_folder):
                         file.write(chunk)
                 st.write(f"Downloaded: {file_path}")
             else:
-                st.warning(f"Failed to download: {link}")
+                st.warning(f"Failed to download {link}")
         except Exception as e:
             st.error(f"Error downloading {link}: {e}")
 
-# Pre-load VGG16 model
-@st.cache_resource
-def load_model():
-    base_model = VGG16(weights='imagenet', include_top=False, input_shape=(224, 224, 3))
-    return Model(inputs=base_model.input, outputs=base_model.output)
+# Function to find similar images
+def find_similar_images(new_img_path, feature_list, image_paths, top_n=5):
+    new_image_features = extract_features(new_img_path)
+    similarities = cosine_similarity(
+        [new_image_features], feature_list
+    )[0]
+    top_indices = np.argsort(similarities)[-top_n:][::-1]
+    similar_image_paths = [image_paths[i] for i in top_indices]
+    return similar_image_paths, similarities[top_indices]
 
-model = load_model()
+# Streamlit UI
+st.title("Image Similarity Search")
+st.sidebar.header("Upload and Dataset Options")
 
-# Function to extract features
-def extract_features(img_path):
-    try:
-        img = image.load_img(img_path, target_size=(224, 224))
-        img_array = image.img_to_array(img, dtype="float32")  # Ensure dtype is float32
-        img_array = np.expand_dims(img_array, axis=0)
-        img_array = preprocess_input(img_array)
-        features = model.predict(img_array)
-        return features.flatten().astype(np.float32)  # Ensure consistent dtype
-    except Exception as e:
-        st.error(f"Error processing image {img_path}: {e}")
-        return None
+dataset_folder = "dataset"
+feature_list = []
+image_paths = []
 
-# Precompute features and clusters
-@st.cache_data
-def prepare_clusters(folder, num_clusters):
-    feature_list = []
-    image_paths = []
+# Step 1: Upload or Download Dataset
+st.sidebar.subheader("Step 1: Load Dataset")
+use_google_sheet = st.sidebar.checkbox("Use Google Sheet for image links", value=True)
+if use_google_sheet:
+    sheet_url = st.sidebar.text_input("Google Sheet CSV URL", value="")
+    if st.sidebar.button("Download Images"):
+        if sheet_url:
+            df = pd.read_csv(sheet_url)
+            image_links = df.iloc[:, 1].dropna()
+            download_images(image_links, dataset_folder)
+        else:
+            st.warning("Please provide a valid Google Sheet CSV URL.")
 
-    # Extract features for all images
-    for filename in os.listdir(folder):
-        if filename.endswith((".jpg", ".jpeg", ".png")):
-            img_path = os.path.join(folder, filename)
-            features = extract_features(img_path)
-            if features is not None:  # Skip if feature extraction fails
+# Step 2: Extract Features
+st.sidebar.subheader("Step 2: Extract Features")
+if st.sidebar.button("Extract Features"):
+    if os.path.exists(dataset_folder):
+        for filename in os.listdir(dataset_folder):
+            if filename.endswith((".jpg", ".jpeg", ".png")):
+                img_path = os.path.join(dataset_folder, filename)
+                features = extract_features(img_path)
                 feature_list.append(features)
                 image_paths.append(img_path)
-
-    if not feature_list:
-        st.error("No valid images found in the dataset folder.")
-        return None
-
-    feature_list = np.array(feature_list, dtype=np.float32)
-
-    # Perform clustering
-    kmeans = KMeans(n_clusters=num_clusters, random_state=42, n_init="auto")
-    cluster_assignments = kmeans.fit_predict(feature_list)
-
-    # Save cluster assignments, features, and image paths
-    clusters = {
-        "kmeans": kmeans,
-        "features": feature_list,
-        "image_paths": image_paths,
-        "assignments": cluster_assignments,
-    }
-    with open(CLUSTER_MODEL_FILE, "wb") as file:
-        pickle.dump(clusters, file)
-
-    return clusters
-
-# Load precomputed clusters
-@st.cache_data
-def load_clusters():
-    if os.path.exists(CLUSTER_MODEL_FILE):
-        with open(CLUSTER_MODEL_FILE, "rb") as file:
-            return pickle.load(file)
+        st.success("Feature extraction completed.")
     else:
-        return prepare_clusters(DATASET_FOLDER, NUM_CLUSTERS)
+        st.warning("Dataset folder does not exist. Please load dataset first.")
 
-# Trigger image download
-if st.button("Download Images"):
-    download_images_from_sheet(sheet_id, DATASET_FOLDER)
-    clusters = prepare_clusters(DATASET_FOLDER, NUM_CLUSTERS)
+# Step 3: Upload Image and Search
+st.sidebar.subheader("Step 3: Find Similar Images")
+uploaded_file = st.sidebar.file_uploader("Upload an Image", type=["jpg", "jpeg", "png"])
+if uploaded_file:
+    uploaded_img_path = os.path.join("temp", uploaded_file.name)
+    with open(uploaded_img_path, "wb") as f:
+        f.write(uploaded_file.getbuffer())
+    st.image(uploaded_file, caption="Uploaded Image", use_column_width=True)
 
-# Load clusters
-clusters = load_clusters()
-
-# Main functionality
-uploaded_file = st.file_uploader("Upload an image", type=["jpg", "jpeg", "png"])
-if uploaded_file is not None:
-    # Save uploaded image locally
-    uploaded_image_path = "uploaded_image.jpg"
-    with open(uploaded_image_path, "wb") as file:
-        file.write(uploaded_file.read())
-
-    # Extract features of the uploaded image
-    try:
-        uploaded_features = extract_features(uploaded_image_path).reshape(1, -1)
-    except Exception as e:
-        st.error(f"Error extracting features from uploaded image: {e}")
-        uploaded_features = None  # Handle cases where feature extraction fails
-
-    # Proceed only if features are successfully extracted
-    if uploaded_features is not None:
-        if clusters:  # Ensure clusters are loaded
-            try:
-                # Ensure features are of correct dtype
-                uploaded_features = np.array(uploaded_features, dtype=np.float32)
-
-                # Predict the cluster
-                assigned_cluster = clusters["kmeans"].predict(uploaded_features)[0]
-
-                # Get images in the same cluster
-                cluster_indices = np.where(clusters["assignments"] == assigned_cluster)[0]
-                cluster_features = clusters["features"][cluster_indices]
-                cluster_image_paths = [clusters["image_paths"][i] for i in cluster_indices]
-
-                # Compute similarity within the cluster
-                similarities = cosine_similarity(
-                    uploaded_features.astype(np.float32),
-                    cluster_features.astype(np.float32)
-                )[0]
-                top_indices = np.argsort(similarities)[-5:][::-1]  # Top 5 similar images
-
-                # Display results
-                st.image(uploaded_image_path, caption="Uploaded Image", use_column_width=True)
-                st.write("Top 5 similar images:")
-                for idx in top_indices:
-                    similar_image_path = cluster_image_paths[idx]
-                    similarity_score = similarities[idx]
-                    img = cv2.imread(similar_image_path)
-                    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-                    st.image(img, caption=f"Score: {similarity_score:.4f}", use_column_width=True)
-
-            except Exception as e:
-                st.error(f"Error during clustering or similarity search: {e}")
+    if st.sidebar.button("Find Similar Images"):
+        if feature_list and image_paths:
+            similar_images, scores = find_similar_images(
+                uploaded_img_path, feature_list, image_paths, top_n=5
+            )
+            st.subheader("Top 5 Similar Images:")
+            for i, (path, score) in enumerate(zip(similar_images, scores)):
+                img = cv2.imread(path)
+                img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+                st.image(img, caption=f"Similarity: {score:.4f}", use_column_width=True)
         else:
-            st.error("Clusters are not loaded or initialized.")
-
+            st.warning("Please load the dataset and extract features first.")
