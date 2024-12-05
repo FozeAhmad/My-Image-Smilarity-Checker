@@ -6,4 +6,3 @@ requests
 scikit-learn
 tensorflow
 matplotlib
-pickel
