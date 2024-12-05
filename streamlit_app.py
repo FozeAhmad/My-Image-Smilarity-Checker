@@ -79,8 +79,6 @@ download_images_from_sheet(SHEET_ID, DATASET_FOLDER)
 # Prepare dataset
 st.write("Preparing dataset...")
 feature_list, image_paths = prepare_dataset(DATASET_FOLDER)
-    # Extract features of the uploaded image
-    new_image_features = extract_features(uploaded_image_path).reshape(1, -1)
 
 from sklearn.cluster import KMeans
 import pickle
