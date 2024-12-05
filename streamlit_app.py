@@ -79,8 +79,29 @@ download_images_from_sheet(SHEET_ID, DATASET_FOLDER)
 # Prepare dataset
 st.write("Preparing dataset...")
 feature_list, image_paths = prepare_dataset(DATASET_FOLDER)
+    # Extract features of the uploaded image
+    new_image_features = extract_features(uploaded_image_path).reshape(1, -1)
 
-# Upload image and find similar images
+from sklearn.cluster import KMeans
+import pickle
+
+# Function to create clusters
+@st.cache_data
+def create_clusters(features, num_clusters=10):
+    kmeans = KMeans(n_clusters=num_clusters, random_state=42)
+    cluster_labels = kmeans.fit_predict(features)
+    return kmeans, cluster_labels
+
+# Cluster the dataset and save cluster information
+st.write("Clustering dataset...")
+kmeans, cluster_labels = create_clusters(feature_list)
+
+# Save clusters and cluster labels for efficient access
+cluster_data = {i: [] for i in range(kmeans.n_clusters)}
+for idx, label in enumerate(cluster_labels):
+    cluster_data[label].append(image_paths[idx])
+
+# Upload image and find similar images within its cluster
 uploaded_file = st.file_uploader("Upload an image", type=["jpg", "jpeg", "png"])
 if uploaded_file is not None:
     # Save uploaded image locally
@@ -91,17 +112,25 @@ if uploaded_file is not None:
     # Extract features of the uploaded image
     new_image_features = extract_features(uploaded_image_path).reshape(1, -1)
 
-    # Compute cosine similarity
-    similarities = cosine_similarity(new_image_features, feature_list)[0]
+    # Assign uploaded image to a cluster
+    query_cluster = kmeans.predict(new_image_features)[0]
+    st.write(f"Uploaded image belongs to Cluster {query_cluster}")
+
+    # Get images and features from the same cluster
+    cluster_image_paths = cluster_data[query_cluster]
+    cluster_features = np.array([feature_list[image_paths.index(p)] for p in cluster_image_paths])
+
+    # Compute cosine similarity within the cluster
+    similarities = cosine_similarity(new_image_features, cluster_features)[0]
 
     # Get indices of top 5 similar images
     top_indices = np.argsort(similarities)[-5:][::-1]
 
     # Display results
     st.image(uploaded_image_path, caption="Uploaded Image", use_column_width=True)
-    st.write("Top 5 similar images:")
+    st.write("Top 5 similar images from the cluster:")
     for idx in top_indices:
-        similar_image_path = image_paths[idx]
+        similar_image_path = cluster_image_paths[idx]
         similarity_score = similarities[idx]
         img = cv2.imread(similar_image_path)
         img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
