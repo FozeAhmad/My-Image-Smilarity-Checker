@@ -1,26 +1,6 @@
-import streamlit as st
 import os
-import numpy as np
-import cv2
+import requests
 import pandas as pd
-from sklearn.metrics.pairwise import cosine_similarity
-from tensorflow.keras.applications.vgg16 import VGG16, preprocess_input
-from tensorflow.keras.preprocessing import image
-from tensorflow.keras.models import Model
-import matplotlib.pyplot as plt
-
-# Initialize the model
-base_model = VGG16(weights='imagenet', include_top=False, input_shape=(224, 224, 3))
-model = Model(inputs=base_model.input, outputs=base_model.output)
-
-# Feature extraction function
-def extract_features(img_path):
-    img = image.load_img(img_path, target_size=(224, 224))
-    img_array = image.img_to_array(img)
-    img_array = np.expand_dims(img_array, axis=0)
-    img_array = preprocess_input(img_array)
-    features = model.predict(img_array)
-    return features.flatten()
 
 # Function to download images
 def download_images(image_links, output_folder):
@@ -35,75 +15,129 @@ def download_images(image_links, output_folder):
                 with open(file_path, 'wb') as file:
                     for chunk in response.iter_content(1024):
                         file.write(chunk)
-                st.write(f"Downloaded: {file_path}")
+                print(f"Downloaded: {file_path}")
             else:
-                st.warning(f"Failed to download {link}")
+                print(f"Failed to download {link}")
         except Exception as e:
-            st.error(f"Error downloading {link}: {e}")
+            print(f"Error downloading {link}: {e}")
 
-# Function to find similar images
+# Google Sheet ID (extracted from the URL)
+SHEET_ID = '121aV7BjJqCRlFcVegbbhI1Zmt67wG61ayRiFtDnafKY'
+
+# Load Google Sheet as a DataFrame
+# Construct the URL for CSV export:
+sheet_url = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv"
+df = pd.read_csv(sheet_url)
+
+# Extract image links from Column B (adjust column name or index if necessary)
+image_links = df.iloc[:, 1].dropna()  # Assuming links are in the second column (Column B)
+
+# Download images to dataset folder
+output_folder = "dataset"
+download_images(image_links, output_folder)
+import os
+import numpy as np
+import cv2
+from sklearn.metrics.pairwise import cosine_similarity
+from tensorflow.keras.applications.vgg16 import VGG16, preprocess_input
+from tensorflow.keras.preprocessing import image
+from tensorflow.keras.models import Model
+base_model = VGG16(weights='imagenet', include_top=False, input_shape=(224, 224, 3))
+model = Model(inputs=base_model.input, outputs=base_model.output)
+def extract_features(img_path):
+    img = image.load_img(img_path, target_size=(224, 224))
+    img_array = image.img_to_array(img)
+    img_array = np.expand_dims(img_array, axis=0)
+    img_array = preprocess_input(img_array)
+    features = model.predict(img_array)
+    return features.flatten()
+    preprocessed_img = preprocess_input(expanded_img_array)
+# ... (extract_features function remains the same) ...
+
+dataset_folder = "/content/dataset"
+feature_list = []
+
+for filename in os.listdir(dataset_folder):
+    if filename.endswith((".jpg", ".jpeg", ".png")):
+        img_path = os.path.join(dataset_folder, filename)
+
+        # Extract features and store them
+        features = extract_features(img_path)  # Call extract_features here
+        feature_list.append(features)  # Append to the feature list
+# Function to find the top N similar images
 def find_similar_images(new_img_path, feature_list, image_paths, top_n=5):
+    # Extract features from the new image
     new_image_features = extract_features(new_img_path)
+
+    # Compute cosine similarity between the new image features and all dataset features
     similarities = cosine_similarity(
-        [new_image_features], feature_list
-    )[0]
-    top_indices = np.argsort(similarities)[-top_n:][::-1]
+        [new_image_features],  # Reshape to 2D array for compatibility
+        feature_list
+    )[0]  # Get the first row of similarity scores
+
+    # Get the indices of the top N most similar images
+    top_indices = np.argsort(similarities)[-top_n:][::-1]  # Sort in descending order
+
+    # Retrieve the paths of the top N similar images
     similar_image_paths = [image_paths[i] for i in top_indices]
+
     return similar_image_paths, similarities[top_indices]
 
-# Streamlit UI
-st.title("Image Similarity Search")
-st.sidebar.header("Upload and Dataset Options")
+# Create a list of image paths corresponding to your dataset images
+image_paths = [
+    os.path.join(dataset_folder, filename)
+    for filename in os.listdir(dataset_folder)
+    if filename.endswith((".jpg", ".jpeg", ".png"))
+]
 
-dataset_folder = "dataset"
-feature_list = []
-image_paths = []
+# Path to the new image
+new_image_path = "/content/new_image.jpg"
 
-# Step 1: Upload or Download Dataset
-st.sidebar.subheader("Step 1: Load Dataset")
-use_google_sheet = st.sidebar.checkbox("Use Google Sheet for image links", value=True)
-if use_google_sheet:
-    sheet_url = st.sidebar.text_input("Google Sheet CSV URL", value="")
-    if st.sidebar.button("Download Images"):
-        if sheet_url:
-            df = pd.read_csv(sheet_url)
-            image_links = df.iloc[:, 1].dropna()
-            download_images(image_links, dataset_folder)
-        else:
-            st.warning("Please provide a valid Google Sheet CSV URL.")
+# Find the 5 most similar images
+similar_images, scores = find_similar_images(new_image_path, feature_list, image_paths, top_n=5)
 
-# Step 2: Extract Features
-st.sidebar.subheader("Step 2: Extract Features")
-if st.sidebar.button("Extract Features"):
-    if os.path.exists(dataset_folder):
-        for filename in os.listdir(dataset_folder):
-            if filename.endswith((".jpg", ".jpeg", ".png")):
-                img_path = os.path.join(dataset_folder, filename)
-                features = extract_features(img_path)
-                feature_list.append(features)
-                image_paths.append(img_path)
-        st.success("Feature extraction completed.")
-    else:
-        st.warning("Dataset folder does not exist. Please load dataset first.")
+# Print results
+print("Top 5 similar images:")
+for i, (path, score) in enumerate(zip(similar_images, scores)):
+    print(f"{i+1}. Path: {path}, Similarity: {score:.4f}")
+import matplotlib.pyplot as plt
+def find_similar_images(new_img_path):
+    """
+    Find and print the top 5 most similar images in the dataset based on cosine similarity.
 
-# Step 3: Upload Image and Search
-st.sidebar.subheader("Step 3: Find Similar Images")
-uploaded_file = st.sidebar.file_uploader("Upload an Image", type=["jpg", "jpeg", "png"])
-if uploaded_file:
-    uploaded_img_path = os.path.join("temp", uploaded_file.name)
-    with open(uploaded_img_path, "wb") as f:
-        f.write(uploaded_file.getbuffer())
-    st.image(uploaded_file, caption="Uploaded Image", use_column_width=True)
+    Args:
+    - new_img_path (str): Path to the new image.
 
-    if st.sidebar.button("Find Similar Images"):
-        if feature_list and image_paths:
-            similar_images, scores = find_similar_images(
-                uploaded_img_path, feature_list, image_paths, top_n=5
-            )
-            st.subheader("Top 5 Similar Images:")
-            for i, (path, score) in enumerate(zip(similar_images, scores)):
-                img = cv2.imread(path)
-                img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-                st.image(img, caption=f"Similarity: {score:.4f}", use_column_width=True)
-        else:
-            st.warning("Please load the dataset and extract features first.")
+    Returns:
+    - list of str: Paths of the 5 most similar images.
+    """
+    # Extract features of the new image
+    new_image_features = extract_features(new_img_path)
+
+    # Compute cosine similarity between the new image and the dataset images
+    similarities = cosine_similarity(
+        [new_image_features],  # Reshape to 2D array for compatibility
+        feature_list
+    )[0]  # Get the first row of similarity scores
+
+    # Get the indices of the top 5 most similar images
+    top_indices = np.argsort(similarities)[-5:][::-1]  # Sort in descending order
+
+    # Retrieve the paths of the top 5 similar images
+    top_paths = [os.path.join(dataset_folder, os.listdir(dataset_folder)[i]) for i in top_indices]
+
+    # Print the top 5 similar image paths
+    print("Top 5 similar images:")
+    for i, path in enumerate(top_paths):
+        print(f"{i+1}. {path}")
+    for i, path in enumerate(top_paths):
+      img = cv2.imread(path)  # Read the image from the path
+      if img is not None:
+        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)  # Convert BGR to RGB for proper display in matplotlib
+        plt.figure(figsize=(5, 5))
+        plt.imshow(img)
+        plt.axis("off")
+        plt.title(f"Similar Image {i+1}")
+        plt.show()
+      else:
+        print(f"Unable to open image: {path}")
